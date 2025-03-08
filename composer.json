@@ -1,0 +1,24 @@
+{
+  "name": "lyn_huang/laravel-model-util",
+  "type": "composer-plugin",
+  "description": "The Laravel Model Util",
+  "keywords": [
+    "laravel-model"
+  ],
+  "license": "MIT",
+  "require": {
+    "php": "^7.3|^8.0",
+    "ext-bcmath": "*",
+    "ext-curl": "*",
+    "ext-json": "*",
+    "ext-libxml": "*",
+    "ext-openssl": "*",
+    "ext-simplexml": "*",
+    "laravel/framework": "^8.0"
+  },
+  "extra": {},
+  "autoload": {
+    "psr-4": {},
+    "files": []
+  }
+}
