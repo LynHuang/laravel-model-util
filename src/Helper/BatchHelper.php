@@ -3,6 +3,7 @@
 namespace LynHuang\LaravelModelUtil\Helper;
 
 use Carbon\Carbon;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 
 class BatchHelper
@@ -16,6 +17,7 @@ class BatchHelper
      * @param string $primaryKey 主键字段名称，默认'id'
      * @param bool $timestamps 是否自动写入更新时间，默认 true
      * @param string $updatedAtColumn 更新时间字段名称，默认'updated_at'
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 受影响的行数
      * @throws \InvalidArgumentException 当数据缺少主键或没有可更新字段时抛出异常
      *
@@ -25,7 +27,7 @@ class BatchHelper
      * 3. 参数绑定方式防止SQL注入
      * 4. 在事务中执行保证原子性
      */
-    public function batchUpdate($table, array $updateArray, int $chunkSize = 100, string $primaryKey = 'id', bool $timestamps = true, string $updatedAtColumn = 'updated_at')
+    public function batchUpdate($table, array $updateArray, int $chunkSize = 100, string $primaryKey = 'id', bool $timestamps = true, string $updatedAtColumn = 'updated_at', $connection = null)
     {
         if (empty($updateArray)) {
             return 0;
@@ -42,10 +44,12 @@ class BatchHelper
             unset($row);
         }
 
-        $table = $this->tableName($table);
+        $conn = DB::connection($connection);
+        $q = $this->quoteChar($conn->getDriverName());
+        $table = $this->tableName($table, $conn);
         $affected = 0;
 
-        collect($updateArray)->chunk($chunkSize)->each(function ($chunk) use ($table, $primaryKey, &$affected) {
+        collect($updateArray)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $primaryKey, $q, &$affected) {
             $cases = [];    // 存储各个字段的CASE语句
             $bindings = []; // 参数绑定值
             $ids = [];      // 当前块涉及的主键集合
@@ -60,7 +64,7 @@ class BatchHelper
 
             // 初始化每个字段的CASE语句开头
             foreach ($fields as $field) {
-                $cases[$field] = "`$field` = CASE ";
+                $cases[$field] = "$q$field$q = CASE ";
             }
 
             // 校验主键并收集当前块的主键集合
@@ -76,29 +80,29 @@ class BatchHelper
             // 注意：SQL 中每个字段的 CASE 横跨所有行，绑定参数必须按"字段→行"的顺序排列
             foreach ($fields as $field) {
                 foreach ($chunk as $datum) {
-                    $cases[$field] .= "WHEN `$primaryKey` = ? THEN ? ";
+                    $cases[$field] .= "WHEN $q$primaryKey$q = ? THEN ? ";
                     $bindings[] = $datum[$primaryKey];
                     $bindings[] = $this->format2SqlValue($datum[$field] ?? null);
                 }
             }
 
             // 组合完整SQL语句
-            $updateSql = "UPDATE `$table` SET ";
+            $updateSql = "UPDATE $q$table$q SET ";
             foreach ($fields as $field) {
                 // 补全CASE语句的ELSE部分
-                $cases[$field] .= "ELSE `$field` END";
+                $cases[$field] .= "ELSE $q$field$q END";
                 $updateSql .= $cases[$field] . ", ";
             }
             $updateSql = rtrim($updateSql, ', ');
 
             // 添加WHERE条件（仅更新当前块的主键）
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $updateSql .= " WHERE `$primaryKey` IN ($placeholders)";
+            $updateSql .= " WHERE $q$primaryKey$q IN ($placeholders)";
             $bindings = array_merge($bindings, $ids);
 
             // 在事务中执行带参数绑定的原生查询
-            $affected += DB::transaction(function () use ($updateSql, $bindings) {
-                return DB::affectingStatement($updateSql, $bindings);
+            $affected += $conn->transaction(function () use ($conn, $updateSql, $bindings) {
+                return $conn->affectingStatement($updateSql, $bindings);
             });
         });
 
@@ -111,8 +115,8 @@ class BatchHelper
      * @param string $table 目标表名
      * @param array $insertArray 要插入的数据数组，每个元素应为关联数组
      * @param int $chunkSize 分块大小，默认1000条/块
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 插入的行数
-     * @throws \InvalidArgumentException 当数据为空或元素不是关联数组时抛出异常
      *
      * 实现原理：
      * 1. 将数据分块处理，避免单条SQL过大
@@ -120,15 +124,18 @@ class BatchHelper
      * 3. 使用参数绑定方式防止SQL注入
      * 4. 在事务中执行保证原子性
      */
-    public function batchInsert($table, array $insertArray, int $chunkSize = 1000)
+    public function batchInsert($table, array $insertArray, int $chunkSize = 1000, $connection = null)
     {
         if (empty($insertArray)) {
             return 0;
         }
-        $table = $this->tableName($table);
+
+        $conn = DB::connection($connection);
+        $q = $this->quoteChar($conn->getDriverName());
+        $table = $this->tableName($table, $conn);
         $affected = 0;
 
-        collect($insertArray)->chunk($chunkSize)->each(function ($chunk) use ($table, &$affected) {
+        collect($insertArray)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $q, &$affected) {
             // 提取所有行的字段并集，保证字段不统一的记录也不丢数据
             $fields = [];
             foreach ($chunk as $datum) {
@@ -149,14 +156,14 @@ class BatchHelper
                 $placeholders[] = '(' . implode(',', array_fill(0, count($fields), '?')) . ')';
             }
 
-            // 构建完整SQL语句
-            $columns = implode('`,`', $fields);
+            // 构建完整SQL语句（列名已按驱动引用符包裹）
+            $columns = implode("$q,$q", $fields);
             $values = implode(',', $placeholders);
-            $sql = "INSERT INTO `$table` (`$columns`) VALUES $values";
+            $sql = "INSERT INTO $q$table$q ($q$columns$q) VALUES $values";
 
             // 事务中执行带参数绑定的原生查询
-            DB::transaction(function () use ($sql, $bindings) {
-                DB::statement($sql, $bindings);
+            $conn->transaction(function () use ($conn, $sql, $bindings) {
+                $conn->statement($sql, $bindings);
             });
 
             $affected += count($chunk);
@@ -168,16 +175,17 @@ class BatchHelper
     /**
      * 批量插入或更新（upsert）
      *
-     * MySQL 使用 ON DUPLICATE KEY UPDATE，PostgreSQL 使用 ON CONFLICT。
+     * MySQL 使用 ON DUPLICATE KEY UPDATE，PostgreSQL / SQLite 使用 ON CONFLICT。
      *
      * @param string $table 目标表名
      * @param array $rows 要插入的数据数组
      * @param array $uniqueBy 唯一键字段（用于判断冲突）
      * @param array $updateColumns 冲突时需要更新的字段，为空时更新全部非唯一键字段
      * @param int $chunkSize 分块大小，默认1000条/块
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 受影响的行数
      */
-    public function batchUpsert($table, array $rows, array $uniqueBy, array $updateColumns = [], int $chunkSize = 1000)
+    public function batchUpsert($table, array $rows, array $uniqueBy, array $updateColumns = [], int $chunkSize = 1000, $connection = null)
     {
         if (empty($rows)) {
             return 0;
@@ -185,13 +193,14 @@ class BatchHelper
         if (empty($uniqueBy)) {
             throw new \InvalidArgumentException('uniqueBy must not be empty for batchUpsert');
         }
-        $table = $this->tableName($table);
-        $driver = DB::connection()->getDriverName();
-        // PostgreSQL 使用双引号标识符，其余（MySQL/MariaDB）使用反引号
-        $q = $driver === 'pgsql' ? '"' : '`';
+
+        $conn = DB::connection($connection);
+        $driver = $conn->getDriverName();
+        $q = $this->quoteChar($driver);
+        $table = $this->tableName($table, $conn);
         $affected = 0;
 
-        collect($rows)->chunk($chunkSize)->each(function ($chunk) use ($table, $uniqueBy, $updateColumns, $driver, $q, &$affected) {
+        collect($rows)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $uniqueBy, $updateColumns, $driver, $q, &$affected) {
             // 提取所有行的字段并集
             $fields = [];
             foreach ($chunk as $datum) {
@@ -237,8 +246,8 @@ class BatchHelper
                 $sql .= "ON DUPLICATE KEY UPDATE $set";
             }
 
-            $affected += DB::transaction(function () use ($sql, $bindings) {
-                return DB::affectingStatement($sql, $bindings);
+            $affected += $conn->transaction(function () use ($conn, $sql, $bindings) {
+                return $conn->affectingStatement($sql, $bindings);
             });
         });
 
@@ -252,18 +261,20 @@ class BatchHelper
      * @param array $ids 主键值数组
      * @param int $chunkSize 分块大小，默认1000条/块
      * @param string $primaryKey 主键字段名称，默认'id'
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 删除的行数
      */
-    public function batchDelete($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id')
+    public function batchDelete($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id', $connection = null)
     {
         if (empty($ids)) {
             return 0;
         }
-        $table = $this->tableName($table);
+        $conn = DB::connection($connection);
+        $table = $this->tableName($table, $conn);
         $affected = 0;
 
-        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($table, $primaryKey, &$affected) {
-            $affected += DB::table($table)->whereIn($primaryKey, $chunk->all())->delete();
+        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $primaryKey, &$affected) {
+            $affected += $conn->table($table)->whereIn($primaryKey, $chunk->all())->delete();
         });
 
         return $affected;
@@ -277,19 +288,21 @@ class BatchHelper
      * @param int $chunkSize 分块大小，默认1000条/块
      * @param string $primaryKey 主键字段名称，默认'id'
      * @param string $deletedAtColumn 软删除时间字段，默认'deleted_at'
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 受影响的行数
      */
-    public function batchSoftDelete($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id', string $deletedAtColumn = 'deleted_at')
+    public function batchSoftDelete($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id', string $deletedAtColumn = 'deleted_at', $connection = null)
     {
         if (empty($ids)) {
             return 0;
         }
-        $table = $this->tableName($table);
+        $conn = DB::connection($connection);
+        $table = $this->tableName($table, $conn);
         $affected = 0;
         $now = Carbon::now()->format('Y-m-d H:i:s');
 
-        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($table, $primaryKey, $deletedAtColumn, $now, &$affected) {
-            $affected += DB::table($table)->whereIn($primaryKey, $chunk->all())->update([$deletedAtColumn => $now]);
+        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $primaryKey, $deletedAtColumn, $now, &$affected) {
+            $affected += $conn->table($table)->whereIn($primaryKey, $chunk->all())->update([$deletedAtColumn => $now]);
         });
 
         return $affected;
@@ -303,31 +316,39 @@ class BatchHelper
      * @param int $chunkSize 分块大小，默认1000条/块
      * @param string $primaryKey 主键字段名称，默认'id'
      * @param string $deletedAtColumn 软删除时间字段，默认'deleted_at'
+     * @param string|null $connection 数据库连接名，null 使用默认连接
      * @return int 受影响的行数
      */
-    public function batchRestore($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id', string $deletedAtColumn = 'deleted_at')
+    public function batchRestore($table, array $ids, int $chunkSize = 1000, string $primaryKey = 'id', string $deletedAtColumn = 'deleted_at', $connection = null)
     {
         if (empty($ids)) {
             return 0;
         }
-        $table = $this->tableName($table);
+        $conn = DB::connection($connection);
+        $table = $this->tableName($table, $conn);
         $affected = 0;
 
-        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($table, $primaryKey, $deletedAtColumn, &$affected) {
-            $affected += DB::table($table)->whereIn($primaryKey, $chunk->all())->update([$deletedAtColumn => null]);
+        collect($ids)->chunk($chunkSize)->each(function ($chunk) use ($conn, $table, $primaryKey, $deletedAtColumn, &$affected) {
+            $affected += $conn->table($table)->whereIn($primaryKey, $chunk->all())->update([$deletedAtColumn => null]);
         });
 
         return $affected;
     }
 
     // 拼接数据库表前缀
-    private function tableName($table)
+    private function tableName($table, Connection $conn)
     {
-        $prefix = DB::getTablePrefix();
+        $prefix = $conn->getTablePrefix();
         if ($prefix !== '' && strpos($table, $prefix) !== 0) {
             return $prefix . $table;
         }
         return $table;
+    }
+
+    // 根据驱动返回标识符引用符：PostgreSQL 用双引号，其余（MySQL/MariaDB/SQLite）用反引号
+    private function quoteChar($driver)
+    {
+        return $driver === 'pgsql' ? '"' : '`';
     }
 
     // 安全处理SQL值的辅助函数

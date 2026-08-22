@@ -70,6 +70,7 @@ $restored = (new BatchHelper())->batchRestore('users', [1, 2]);
 | `$timestamps` | `true` | `batchUpdate` 是否自动写入更新时间 |
 | `$updatedAtColumn` | `updated_at` | `batchUpdate` 的更新时间字段名 |
 | `$deletedAtColumn` | `deleted_at` | `batchSoftDelete` / `batchRestore` 的软删除字段名 |
+| `$connection` | `null` | 数据库连接名，`null` 使用默认连接 |
 
 ## 通用约定
 
@@ -77,3 +78,5 @@ $restored = (new BatchHelper())->batchRestore('users', [1, 2]);
 - 每批数据在独立事务中执行，单批失败自动回滚。
 - 表名自动拼接 `DB::getTablePrefix()` 前缀。
 - 数据字段不一致时自动取所有行的字段并集，缺失字段填 `null`。
+- 所有方法支持指定数据库连接（最后一个参数）：`(new BatchHelper())->batchInsert('users', $rows, 1000, 'pgsql_read')`；未指定时使用默认连接。
+- 标识符引用符按驱动自动适配：PostgreSQL 使用双引号，MySQL / MariaDB / SQLite 使用反引号。
