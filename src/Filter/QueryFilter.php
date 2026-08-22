@@ -2,12 +2,13 @@
 
 namespace LynHuang\LaravelModelUtil\Filter;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use LynHuang\LaravelModelUtil\Exceptions\InvalidParamException;
 
 abstract class QueryFilter
 {
@@ -18,19 +19,53 @@ abstract class QueryFilter
     const OPTION_LESS           = 'lt'; // 小于
     const OPTION_LESS_OR_EQUAL  = 'le'; // 小于等于
     const OPTION_BETWEEN        = 'bt'; // 在...之间
+    const OPTION_NOT_BETWEEN    = 'nb'; // 不在...之间
     const OPTION_IN             = 'in'; // 在...之内
     const OPTION_NOT_IN         = 'ni'; // 不在...之内
     const OPTION_LIKE           = 'lk'; // 模糊查询
     const OPTION_NULL           = 'nl'; // 为空
+    const OPTION_NOT_NULL       = 'nn'; // 不为空
 
     protected $request;
     protected $builder;
     protected $table;
     protected $input = [];
 
-    public function __construct(Request $request)
+    /**
+     * 允许排序的字段白名单，子类按需配置
+     * 例：protected $sortable = ['id', 'created_at', 'name'];
+     * @var array
+     */
+    protected $sortable = [];
+
+    /**
+     * 默认每页条数，可通过 ?per_page= 参数覆盖
+     * @var int
+     */
+    protected $perPage = 15;
+
+    /**
+     * 创建时间字段名，子类可按需覆盖
+     * @var string
+     */
+    protected $createdAtColumn = 'created_at';
+
+    /**
+     * 多态关联在本表中的关联字段名，子类可按需覆盖
+     * @var string
+     */
+    protected $morphIdColumn = 'object_id';
+
+    public function __construct($input = null)
     {
-        $this->request = $request;
+        if ($input instanceof Request) {
+            $this->request = $input;
+        } else {
+            $this->request = new Request();
+            if (is_array($input) && !empty($input)) {
+                $this->request->merge($input);
+            }
+        }
         $this->filters();
     }
 
@@ -41,14 +76,41 @@ abstract class QueryFilter
 
         foreach ($this->input as $name => $value) {
             if (is_null($value)) continue;
-            if (method_exists($this, $name)) {
-                call_user_func_array([$this, $name], [$value]);
-            }
+            if (!method_exists($this, $name)) continue;
+            if ($this->isInternalMethod($name)) continue;
+            call_user_func_array([$this, $name], [$value]);
         }
 
         $this->applyAfter();
 
         return $this->builder;
+    }
+
+    /**
+     * 判断方法是否为 QueryFilter 基类的内部方法
+     *
+     * 防止请求参数与基类内部方法同名时被意外调用，
+     * 例如 ?throwError=xxx 触发异常、?composeBuilder=xxx 报错等。
+     * 仅当子类复写了同名方法时，该名称才会被允许自动调用。
+     *
+     * @param string $name
+     * @return bool
+     */
+    private function isInternalMethod($name)
+    {
+        static $internal = null;
+
+        if ($internal === null) {
+            $internal = array_diff(
+                array_map(function (\ReflectionMethod $method) {
+                    return $method->getName();
+                }, (new \ReflectionClass(self::class))->getMethods()),
+                // 基类中允许通过请求参数直接触发的通用过滤方法
+                ['id', 'created_at', 'sort', 'per_page', 'random']
+            );
+        }
+
+        return in_array($name, $internal, true);
     }
 
     /**
@@ -114,7 +176,37 @@ abstract class QueryFilter
 
     protected function created_at($created_at)
     {
-        $this->analyzeParam('created_at', $created_at);
+        // 快捷时间范围：?created_at=today / yesterday / week / month / year
+        if ($bounds = $this->timeRangeBounds($created_at)) {
+            $this->builder->whereBetween($this->createdAtColumn, $bounds);
+            return;
+        }
+        $this->analyzeParam($this->createdAtColumn, $created_at);
+    }
+
+    /**
+     * 快捷时间范围解析
+     *
+     * @param $value
+     * @return array|null 返回 [起, 止] 时间范围，非预置关键字时返回 null
+     */
+    protected function timeRangeBounds($value)
+    {
+        $now = Carbon::now();
+        switch ($value) {
+            case 'today':
+                return [Carbon::today()->startOfDay(), Carbon::today()->endOfDay()];
+            case 'yesterday':
+                return [Carbon::yesterday()->startOfDay(), Carbon::yesterday()->endOfDay()];
+            case 'week':
+                return [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()];
+            case 'month':
+                return [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()];
+            case 'year':
+                return [$now->copy()->startOfYear(), $now->copy()->endOfYear()];
+            default:
+                return null;
+        }
     }
 
     /**
@@ -157,13 +249,13 @@ abstract class QueryFilter
      */
     protected function relateIdSearch(string $relate_model, string $relateFilter, array $search_fields, array $search_fields_value, string $relate_local_id = 'id')
     {
-        $request = new Request();
+        $input = [];
         foreach ($search_fields as $i => $field) {
-            $request->offsetSet($field, $search_fields_value[$i]);
+            $input[$field] = $search_fields_value[$i];
         }
-        $filter  = new $relateFilter($request);
-        $idQuery = $relate_model::query()->filter($filter)->select($relate_local_id);
-        return $idQuery;
+        $filter  = new $relateFilter($input);
+        // 返回查询构造器，由调用方以子查询形式使用，避免在应用层物化中间结果
+        return $relate_model::query()->filter($filter)->select($relate_local_id);
     }
 
 
@@ -186,7 +278,8 @@ abstract class QueryFilter
         $this->composeBuilder($query, $relate_id, $value, $op);
 
         $ids = $query->get()->pluck($local_id)->unique();
-        $this->builder->whereIn('id', $ids);
+        // 使用当前模型主键字段，避免硬编码
+        $this->builder->whereIn($this->builder->getModel()->getKeyName(), $ids);
     }
 
     /**
@@ -254,17 +347,35 @@ abstract class QueryFilter
     {
         $object_type = $this->input['object_type'] ?? null;
         if ($object_type) {
-            $model = getModelByType($object_type);
+            $model = $this->getModelByType($object_type);
             if ($model) {
-                $model = new $model();
+                $model    = new $model();
+                $keyName  = $model->getKeyName();
                 if (is_array($value)) {
-                    $ids = $model->whereIn($field, $value)->get()->pluck('id');
+                    $ids = $model->whereIn($field, $value)->get()->pluck($keyName);
                 } else {
-                    $ids = $model->where($field, $value)->get()->pluck('id');
+                    $ids = $model->where($field, $value)->get()->pluck($keyName);
                 }
-                $this->builder->whereIn('object_id', $ids);
+                // 使用可配置的本表多态关联字段，避免硬编码
+                $this->builder->whereIn($this->morphIdColumn, $ids);
             }
         }
+    }
+
+    /**
+     * 根据 object_type 解析对应的模型类名
+     *
+     * 默认从 config('model_util.object_types') 读取类型与模型的映射，
+     * 例如：['houses' => \App\Models\House::class]
+     * 子类可按需复写此方法，以满足自定义映射规则。
+     *
+     * @param string $type 多态类型
+     * @return string|null 模型类名，未配置时返回 null
+     */
+    protected function getModelByType($type)
+    {
+        $map = config('model_util.object_types', []);
+        return is_array($map) && isset($map[$type]) ? $map[$type] : null;
     }
 
     /**
@@ -323,6 +434,10 @@ abstract class QueryFilter
         if ($table_prefix) {
             $field = $this->table . '.' . $field;
         }
+        // 非标量值（如数组、对象）无法参与字符串运算，直接忽略
+        if (!is_scalar($value)) {
+            return;
+        }
         //在和的情况下，需要遍历条件
         if (Str::contains($value, '&&')) {
             $vs = explode('&&', $value);
@@ -339,7 +454,14 @@ abstract class QueryFilter
             $this->builder->where(function ($query) use ($field, $vs) {
                 foreach ($vs as $k => $v) {
                     [$op, $p] = $this->splitOptionAndValue($v);
-                    if ($op == self::OPTION_IN || $op == self::OPTION_NOT_IN || $op == self::OPTION_BETWEEN) {
+                    // in / ni / bt / nb / nn 无法用普通 where 表达，或条件下不支持
+                    if (in_array($op, [
+                        self::OPTION_IN,
+                        self::OPTION_NOT_IN,
+                        self::OPTION_BETWEEN,
+                        self::OPTION_NOT_BETWEEN,
+                        self::OPTION_NOT_NULL,
+                    ], true)) {
                         $this->throwError($field);
                     }
                     if ($k == 0) {
@@ -400,11 +522,12 @@ abstract class QueryFilter
      */
     protected function searchIds($field, $value, $model, $model_field, $other_condition = [])
     {
-        $ids = $model::valid()->where($other_condition)->get()->pluck($model_field);
+        // 内联子查询，避免把中间结果物化到应用层
+        $query = $model::valid()->where($other_condition)->select($model_field);
         if ($value) {
-            $this->builder->whereIn($field, $ids);
+            $this->builder->whereIn($field, $query);
         } else {
-            $this->builder->whereNotIn($field, $ids);
+            $this->builder->whereNotIn($field, $query);
         }
     }
 
@@ -419,16 +542,15 @@ abstract class QueryFilter
     public function searchIdsWithFilter(array $relation, $model, $model_field, $filter, $src_field = 'id')
     {
         $params = $this->request->only(array_keys($relation));
-        if ($params) {
-            $request = new Request();
-            foreach ($params as $k => $v) {
-                if (is_null($v)) continue;
+        if (empty($params)) return;
 
-                $request->offsetSet($relation[$k], $v);
-            }
-            $ids = $model::filter(new $filter($request))->valid()->select($model_field)->distinct()->get()->pluck($model_field);
-            $this->builder->whereIn($src_field, $ids);
+        // 将请求参数名映射为过滤器字段名
+        $mapped = [];
+        foreach ($params as $k => $v) {
+            if (is_null($v)) continue;
+            $mapped[$relation[$k]] = $v;
         }
+        $this->searchIdsByFilter($mapped, $model, $model_field, $filter, $src_field, true);
     }
 
     /**
@@ -441,25 +563,127 @@ abstract class QueryFilter
      */
     public function searchIdsWithAttrsTable($params, $model, $model_field, $filter, $src_field = 'id')
     {
-        $request = new Request();
+        $mapped = [];
         foreach ($params as $k => $v) {
             if (is_null($v)) continue;
-
-            $request->offsetSet($k, $v);
+            $mapped[$k] = $v;
         }
-        $ids = $model::filter(new $filter($request))->select($model_field)->distinct()->get()->pluck($model_field);
-        $this->builder->whereIn($src_field, $ids);
+        $this->searchIdsByFilter($mapped, $model, $model_field, $filter, $src_field, false);
     }
 
-    //通用id过滤器，可重构
+    /**
+     * searchIdsWithFilter 与 searchIdsWithAttrsTable 的公共实现
+     *
+     * @param array $params 过滤器参数字段 => 值
+     * @param $model
+     * @param $model_field
+     * @param $filter
+     * @param string $src_field
+     * @param bool $with_valid 是否应用模型的 valid() 作用域
+     */
+    private function searchIdsByFilter($params, $model, $model_field, $filter, $src_field, $with_valid)
+    {
+        if (empty($params)) return;
+
+        $query = $model::filter(new $filter($params))->select($model_field)->distinct();
+        if ($with_valid) {
+            $query = $query->valid();
+        }
+        // 内联子查询，避免在应用层物化中间结果
+        $this->builder->whereIn($src_field, $query);
+    }
+
+    //通用主键过滤器，可重构
     protected function id($param)
     {
-        $this->analyzeParam('id', $param);
+        // 使用模型主键字段，避免硬编码
+        $this->analyzeParam($this->builder->getModel()->getKeyName(), $param);
+    }
+
+    /**
+     * 排序过滤：?sort=-created_at,name
+     * 负号前缀表示倒序，多个排序字段用英文逗号分隔。
+     * 字段必须在 $sortable 白名单内，未配置白名单时忽略排序。
+     *
+     * @param $value
+     */
+    protected function sort($value)
+    {
+        if (!is_scalar($value)) return;
+        if (empty($this->sortable)) {
+            return;
+        }
+        foreach (explode(',', (string)$value) as $item) {
+            $item = trim($item);
+            if ($item === '') continue;
+
+            $desc  = Str::startsWith($item, '-');
+            $field = ltrim($item, '-');
+            if (!in_array($field, $this->sortable, true)) {
+                $this->throwError($field);
+            }
+            if ($desc) {
+                $this->builder->orderByDesc($field);
+            } else {
+                $this->builder->orderBy($field);
+            }
+        }
+    }
+
+    /**
+     * 每页条数：?per_page=20
+     * 配合 getPerPage() 使用：User::query()->filter($filter)->paginate($filter->getPerPage());
+     *
+     * @param $value
+     */
+    protected function per_page($value)
+    {
+        if (!is_scalar($value)) return;
+        $this->perPage = max(1, (int)$value);
+    }
+
+    /**
+     * 获取每页条数（受 per_page 参数影响）
+     *
+     * @return int
+     */
+    public function getPerPage()
+    {
+        return $this->perPage;
+    }
+
+    /**
+     * 随机取 N 条：?random=10
+     *
+     * 避免 orderBy random() 的全表排序：先取主键 min/max 再随机起点顺序取，
+     * 仅适用于主键分布较均匀的自增主键场景（近似随机）。
+     *
+     * @param $value
+     */
+    protected function random($value)
+    {
+        if (!is_scalar($value)) return;
+        $n = max(1, (int)$value);
+        $keyName = $this->builder->getModel()->getKeyName();
+        $base    = $this->builder->toBase();
+        $max     = (int)$base->max($keyName);
+        $min     = (int)$base->min($keyName);
+
+        if ($max <= $min) {
+            $this->builder->inRandomOrder()->limit($n);
+            return;
+        }
+        $start = random_int($min, $max);
+        $this->builder->where($keyName, '>=', $start)->orderBy($keyName)->limit($n);
     }
 
     //分离操作符和搜索值
     protected function splitOptionAndValue($v): array
     {
+        if (!is_scalar($v)) {
+            return [self::OPTION_EQUAL, null]; //非标量值不参与字符串运算
+        }
+        $v = (string)$v;
         if (Str::startsWith($v, $this->ops())) {
             $op = explode(':', $v)[0];
             $v  = substr($v, 3);
@@ -483,6 +707,13 @@ abstract class QueryFilter
                 }
                 $builder->whereBetween($field, $params);
                 break;
+            case self::OPTION_NOT_BETWEEN:
+                $params = explode(',', $value);
+                if (count($params) != 2) {
+                    $this->throwError($field);
+                }
+                $builder->whereNotBetween($field, $params);
+                break;
             case self::OPTION_IN:
                 $builder->whereIn($field, explode(',', $value));
                 break;
@@ -492,6 +723,9 @@ abstract class QueryFilter
             case self::OPTION_NULL:
                 $builder->whereNull($field);
                 break;
+            case self::OPTION_NOT_NULL:
+                $builder->whereNotNull($field);
+                break;
             default:
                 if (!isset($ops[$op])) {
                     $this->throwError($field);
@@ -500,22 +734,10 @@ abstract class QueryFilter
         }
     }
 
-    private function _getArr($str, $delimiter = ',', $count = 2)
-    {
-        $arr = explode($delimiter, $str);
-        if (count($arr) != $count)
-            $this->throwError('');
-        return $arr;
-    }
-
-    //抛出参数错误的响应错误
+    //抛出参数错误
     protected function throwError($field)
     {
-        throw new HttpResponseException(response()->json([
-            'message' => $field . '参数格式错误',
-            'code'    => -1,
-            'status'  => 'error',
-        ]));
+        throw new InvalidParamException($field . '参数格式错误');
     }
 
     //将传递过来的操作符转换成sql操作符
@@ -546,7 +768,9 @@ abstract class QueryFilter
             self::OPTION_IN . ":",
             self::OPTION_NOT_IN . ":",
             self::OPTION_BETWEEN . ":",
+            self::OPTION_NOT_BETWEEN . ":",
             self::OPTION_NULL . ":",
+            self::OPTION_NOT_NULL . ":",
         ];
     }
 }
