@@ -2,3 +2,9 @@ vendor
 .idea
 .phpunit.result.cache
 REFACTOR_CHECKLIST.md
+
+# 本项目是 library，但 CI 跑 PHP 8.1/8.2/8.3 × Laravel 9/10/11 矩阵测试，
+# composer.lock 只能表示一种版本组合，无法覆盖矩阵中的 9 种情况，
+# 且 CI 每次跑都需要重新解析依赖，因此不在 git 里跟踪 lock 文件。
+# 本地保留 composer.lock 便于日常 `composer install` / `composer update`。
+composer.lock

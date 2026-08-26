@@ -28,11 +28,11 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
 
-      - name: Set Laravel version
-        run: composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-progress --no-update
-
-      - name: Install dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
+      - name: Install dependencies for Laravel ${{ matrix.laravel }}
+        # 仓库自带 composer.lock（如 laravel/framework 8.x 锁住），旧写法 composer require --no-update
+        # 再 composer install 会因为 lock 里的 8.x 不满足 ^9.0/^10.0/^11.0 而直接报错。
+        # 合并成单条 --update-with-all-dependencies，让 composer 重新解析 lock 后再装包。
+        run: composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-progress --update-with-all-dependencies
 
       - name: Run tests
         run: composer test
