@@ -4,5 +4,4 @@
 /.gitignore export-ignore
 /phpunit.xml export-ignore
 /.idea export-ignore
-/config export-ignore
 /tests export-ignore
