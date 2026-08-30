@@ -8,3 +8,4 @@ REFACTOR_CHECKLIST.md
 # 且 CI 每次跑都需要重新解析依赖，因此不在 git 里跟踪 lock 文件。
 # 本地保留 composer.lock 便于日常 `composer install` / `composer update`。
 composer.lock
+AGENTS.md
