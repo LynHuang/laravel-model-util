@@ -204,6 +204,7 @@ public function foo($value)
     $this->searchParam(['name', 'email'], $value);
 
     // 多字段搜索 + 关联表（[关联模型, 关联过滤器, 关联外键字段]）
+    // 注意：关联过滤器中需定义 search($value) 方法接收搜索值
     $this->searchParam(['name'], $value, [
         [\App\Models\Company::class, \App\Filters\CompanyFilter::class, 'company_id'],
     ]);
@@ -262,13 +263,20 @@ class UserFilter extends QueryFilter
 
 ## 异常处理
 
-参数格式错误时抛出 `LynHuang\LaravelModelUtil\Exceptions\InvalidParamException`（继承 `\InvalidArgumentException`），与 HTTP 响应解耦，可在全局异常处理器中统一处理：
+参数格式错误时抛出 `LynHuang\LaravelModelUtil\Exceptions\InvalidParamException`（继承 `\InvalidArgumentException`），与 HTTP 响应解耦，可在全局异常处理器中统一处理。推荐配合 `ApiResponse::fromThrowable()` 转成统一响应（`InvalidParamException` 自动映射 code 422）：
 
 ```php
-// app/Exceptions/Handler.php
+// Laravel 8/9/10：app/Exceptions/Handler.php
 $this->renderable(function (\LynHuang\LaravelModelUtil\Exceptions\InvalidParamException $e, $request) {
-    return response()->json(['message' => $e->getMessage(), 'code' => -1, 'status' => 'error'], 422);
+    return response()->json(\LynHuang\LaravelModelUtil\Support\ApiResponse::fromThrowable($e));
 });
+
+// Laravel 11/12：bootstrap/app.php 的 withExceptions 中
+->withExceptions(function (Exceptions $exceptions) {
+    $exceptions->render(function (\LynHuang\LaravelModelUtil\Exceptions\InvalidParamException $e, $request) {
+        return response()->json(\LynHuang\LaravelModelUtil\Support\ApiResponse::fromThrowable($e));
+    });
+})
 ```
 
 ## 安全性说明
@@ -276,4 +284,5 @@ $this->renderable(function (\LynHuang\LaravelModelUtil\Exceptions\InvalidParamEx
 - 所有值均通过 `where` 参数绑定构建，无 SQL 注入风险。
 - `apply()` 仅自动调用子类自定义的过滤方法，基类内部方法不会被请求参数触发（如 `?throwError=xxx` 无效）。
 - 排序字段必须在 `$sortable` 白名单内，未配置白名单时忽略排序。
+- `$filterable` 声明式映射中，请求值携带的操作符前缀同样必须在白名单内，否则抛出异常。
 - 非标量（数组等）请求值会被安全忽略。

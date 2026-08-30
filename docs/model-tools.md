@@ -48,6 +48,7 @@ $category->descendantIds();                         // 后代 id 数组
 基于版本号字段检测并发修改，防止互相覆盖：
 
 ```php
+use LynHuang\LaravelModelUtil\Exceptions\OptimisticLockException;
 use LynHuang\LaravelModelUtil\Traits\OptimisticLocking;
 
 class Order extends Model
@@ -179,7 +180,7 @@ MaskHelper::mask('123456', 2, 3);          // 12***6
 
 ## 模型操作审计 RecordsActivity
 
-自动记录创建 / 更新 / 删除日志，需先发布并执行迁移：
+自动记录创建 / 更新 / 删除 / 软删恢复日志，需先发布并执行迁移：
 
 ```bash
 php artisan vendor:publish --tag=model-util-migrations

@@ -31,9 +31,9 @@ composer require lyn_huang/laravel-model-util
 php artisan vendor:publish --tag=model-util-config
 ```
 
-发布后生成 `config/model_util.php`，可配置多态关联映射、操作审计表名、SQL 日志等（各配置项详解见 [安装与配置](docs/installation.md)）。
+发布后生成 `config/model_util.php`，可配置多态关联映射、操作审计表名与排除字段、SQL 日志、`make:filter` 生成目录等（各配置项详解见 [安装与配置](docs/installation.md)）。
 
-> 不发布也能用——包内部已合并默认配置，`config('model_util.*')` 直接可读。使用操作审计（RecordsActivity）时还需 `php artisan vendor:publish --tag=model-util-migrations`。
+> 不发布也能用——包内部已合并默认配置，`config('model_util.*')` 直接可读。使用操作审计（RecordsActivity）时还需 `php artisan vendor:publish --tag=model-util-migrations`；`make:filter` 的骨架模板可用 `--tag=model-util-stubs` 发布后自定义。
 
 ## 快速上手
 
@@ -108,8 +108,8 @@ class UserController extends Controller
 | [请求过滤器 QueryFilter](docs/query-filter.md) | 操作符速查表、声明式过滤、组合条件、排序分页随机、关联过滤、动态参数、异常处理 |
 | [批量操作 BatchHelper](docs/batch-helper.md) | 模型版操作、批量更新 / 插入 / upsert / 删除 / 软删除恢复、参数说明 |
 | [模型层工具](docs/model-tools.md) | 树形结构、模型树、排序重排、多语言、字段加解密 / 脱敏、操作审计、状态机、乐观锁、计数缓存、唯一编号 |
-| [通用辅助](docs/general-utils.md) | 统一响应、防重复提交、经纬度距离、SQL 日志 |
+| [通用辅助](docs/general-utils.md) | 统一响应、防重复提交、经纬度距离、SQL 日志、路由搜索命令 |
 
 ## License
 
-[MIT](LICENSE)
+MIT（`composer.json` 已声明；如需 LICENSE 文件可后续补充）

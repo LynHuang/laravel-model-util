@@ -45,15 +45,14 @@ class RouteSearchCommandTest extends TestCase
         $output = $this->runSearch(['keyword' => 'users']);
         $this->assertStringContainsString('api/users', $output);
         $this->assertStringContainsString(SearchUserController::class . '@index', $output);
-        $this->assertStringContainsString('users.index', $output);
         $this->assertStringNotContainsString('api/orders', $output);
 
         // 关键字命中控制器方法名
         $output = $this->runSearch(['keyword' => 'show']);
         $this->assertStringContainsString('api/users', $output);
-        $this->assertStringNotContainsString('orders.store', $output);
+        $this->assertStringNotContainsString('api/orders', $output);
 
-        // 关键字命中路由名称（大小写不敏感）
+        // 关键字命中路由名称（大小写不敏感，名称不在表格中展示但仍参与匹配）
         $output = $this->runSearch(['keyword' => 'ORDERS.STORE']);
         $this->assertStringContainsString('api/orders', $output);
         $this->assertStringContainsString('Closure', $output);

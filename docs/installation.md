@@ -49,7 +49,7 @@ return [
 ];
 ```
 
-> 未发布配置文件时，包内部已合并默认配置，`config('model_util.*')` 依然可用，默认值见上表。
+> 未发布配置文件时，包内部已合并默认配置，`config('model_util.*')` 依然可用，默认值见上方代码块。
 
 ## 各配置项详解
 
@@ -64,11 +64,15 @@ class CommentFilter extends QueryFilter
 {
     protected function getModelByType($type)
     {
-        // 自定义解析逻辑
-        return match ($type) {
-            'houses' => \App\Models\House::class,
-            default  => null,
-        };
+        // 自定义解析逻辑（注意保持与包的 PHP 最低版本兼容）
+        switch ($type) {
+            case 'houses':
+                return \App\Models\House::class;
+            case 'shops':
+                return \App\Models\Shop::class;
+            default:
+                return null;
+        }
     }
 }
 ```

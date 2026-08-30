@@ -59,7 +59,7 @@ class RouteSearchCommand extends Command
             return 0;
         }
 
-        $this->table(['请求方式', 'URI', '路由名称', '控制器@方法'], $rows);
+        $this->table(['请求方式', 'URI', '控制器@方法'], $rows);
         $this->info('共找到 ' . count($rows) . ' 条路由');
 
         return 0;
@@ -93,14 +93,13 @@ class RouteSearchCommand extends Command
      * 格式化单条路由
      *
      * @param Route $route
-     * @return array [请求方式, URI, 路由名称, 控制器@方法]
+     * @return array [请求方式, URI, 控制器@方法]
      */
     private function formatRoute(Route $route)
     {
         return [
             implode('|', $route->methods()),
             $route->uri(),
-            (string)$route->getName() ?: '-',
             $route->getActionName(),
         ];
     }
