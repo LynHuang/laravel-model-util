@@ -45,11 +45,31 @@ class UserFilterWithCreatedAtColumn extends QueryFilter
     protected $createdAtColumn = 'created_date';
 }
 
+class FilterableUserFilter extends QueryFilter
+{
+    protected $filterable = [
+        'name'   => 'lk',
+        'price'  => ['ge', 'le'],
+        'status' => 'in',
+    ];
+
+    public function cname($value)
+    {
+        $this->analyzeParam('name', 'lk:' . $value);
+    }
+}
+
 class QueryFilterTest extends TestCase
 {
     private function applyFilter(array $inputs)
     {
         $filter = new UserFilter($inputs);
+        return $filter->apply(User::query());
+    }
+
+    private function applyFilterable(array $inputs)
+    {
+        $filter = new FilterableUserFilter($inputs);
         return $filter->apply(User::query());
     }
 
@@ -176,5 +196,65 @@ class QueryFilterTest extends TestCase
         $builder = $this->applyFilter(['id' => ['1', '2']]);
 
         $this->assertEmpty($builder->getQuery()->wheres);
+    }
+
+    public function testFilterableSingleOperator()
+    {
+        $builder = $this->applyFilterable(['name' => '黄']);
+
+        $where = $builder->getQuery()->wheres[0];
+        $this->assertEquals('name', $where['column']);
+        $this->assertEquals('like', $where['operator']);
+        $this->assertEquals('%黄%', $where['value']);
+    }
+
+    public function testFilterableMultiOperatorsWithExplicitPrefix()
+    {
+        $builder = $this->applyFilterable(['price' => 'ge:10&&le:20']);
+
+        $wheres = $builder->getQuery()->wheres;
+        $this->assertCount(2, $wheres);
+        $this->assertEquals('>=', $wheres[0]['operator']);
+        $this->assertEquals('<=', $wheres[1]['operator']);
+    }
+
+    public function testFilterablePlainValueUsesFirstOperator()
+    {
+        // 不带操作符前缀且白名单有多个操作符时，取第一个作为默认
+        $builder = $this->applyFilterable(['price' => '10']);
+
+        $this->assertEquals('>=', $builder->getQuery()->wheres[0]['operator']);
+        $this->assertEquals('price', $builder->getQuery()->wheres[0]['column']);
+    }
+
+    public function testFilterableInOperator()
+    {
+        $builder = $this->applyFilterable(['status' => '1,2']);
+
+        $where = $builder->getQuery()->wheres[0];
+        $this->assertEquals('status', $where['column']);
+        $this->assertEquals(['1', '2'], $where['values']);
+    }
+
+    public function testFilterableWhitelistRejectsOtherOperators()
+    {
+        // gt 不在 price 的白名单内，拒绝查询
+        $this->expectException(InvalidParamException::class);
+        $this->applyFilterable(['price' => 'gt:5']);
+    }
+
+    public function testFilterableUnknownParamIgnored()
+    {
+        $builder = $this->applyFilterable(['foo' => 'x']);
+
+        $this->assertEmpty($builder->getQuery()->wheres);
+    }
+
+    public function testFilterableDoesNotShadowUnlistedParams()
+    {
+        // cname 不在映射内，仍走自定义过滤方法
+        $builder = $this->applyFilterable(['cname' => '黄']);
+
+        $this->assertEquals('name', $builder->getQuery()->wheres[0]['column']);
     }
 }

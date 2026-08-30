@@ -110,6 +110,28 @@ $this->analyzeParam('id', 'eq:1||eq:2');  // id = 1 or id = 2
 
 > `||` 组合不支持 `in` / `ni` / `bt` / `nb` / `nn` 操作符。
 
+## 声明式过滤（$filterable）
+
+简单字段无需逐个编写过滤方法，声明映射即可自动构建条件：
+
+```php
+class ProductFilter extends QueryFilter
+{
+    protected $filterable = [
+        'name'   => 'lk',             // ?name=手机        → name like '%手机%'
+        'price'  => ['ge', 'le'],     // ?price=ge:100&&le:500 → 区间；?price=le:500 单边
+        'status' => 'in',             // ?status=1,2       → status in (1, 2)
+    ];
+}
+```
+
+规则：
+
+- 映射的键即数据库字段名（也是请求参数名）；参数名需要与字段名不同时，请编写自定义过滤方法。
+- 值可带操作符前缀，前缀必须在白名单内，否则抛出 `InvalidParamException`（与排序白名单同一套防注入思路）。
+- 不带前缀时默认使用白名单第一个操作符（如 `'name' => 'lk'` 的裸值按 `lk` 处理）。
+- 命中映射的参数按映射处理，不再调用同名过滤方法；`&&` / `||` 组合等语法与手动过滤完全一致。
+
 ## 内置通用方法
 
 无需自定义，基类已提供：

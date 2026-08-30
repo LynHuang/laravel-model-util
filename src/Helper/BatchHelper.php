@@ -9,6 +9,19 @@ use Illuminate\Support\Facades\DB;
 class BatchHelper
 {
     /**
+     * 绑定 Eloquent 模型，返回自动解析表名 / 主键 / 时间戳 / 软删字段的批量操作代理
+     *
+     * 例：BatchHelper::for(User::class)->update($rows);
+     *
+     * @param string $modelClass Eloquent 模型类名
+     * @return ModelBatch
+     */
+    public static function for(string $modelClass)
+    {
+        return new ModelBatch($modelClass);
+    }
+
+    /**
      * 批量更新数据（使用CASE WHEN语句实现高效批量更新）
      *
      * @param string $table 需要更新的表名

@@ -4,6 +4,23 @@
 
 使用原生 SQL 实现高性能批量操作，自动分块、参数绑定、事务执行，自动拼接数据库表前缀，所有方法均返回受影响的行数。
 
+## 模型版（推荐）
+
+`BatchHelper::for(Model::class)` 返回绑定模型的操作代理，表名、主键、时间戳字段、软删字段、连接全部按模型自动解析：
+
+```php
+use LynHuang\LaravelModelUtil\Helper\BatchHelper;
+
+BatchHelper::for(User::class)->update($rows);              // 批量更新，自动维护 updated_at
+BatchHelper::for(User::class)->insert($rows);              // 批量插入，自动补充 created_at / updated_at
+BatchHelper::for(User::class)->upsert($rows, ['email']);   // 批量插入或更新
+BatchHelper::for(User::class)->delete($ids);               // 按主键批量删除
+BatchHelper::for(User::class)->softDelete($ids);           // 批量软删除（模型需使用 SoftDeletes）
+BatchHelper::for(User::class)->restore($ids);              // 批量恢复
+```
+
+各方法的分块大小等参数与原生方法一致；`update()` 可用第三参强制开关时间戳：`->update($rows, 100, false)`。
+
 ## 批量更新
 
 使用 `CASE WHEN` 单条 SQL 更新多行，仅更新传入的字段（主键外的字段）：

@@ -56,6 +56,24 @@ abstract class QueryFilter
      */
     protected $morphIdColumn = 'object_id';
 
+    /**
+     * 声明式过滤映射：请求参数名（即字段名）=> 允许的操作符（单个字符串或数组）
+     *
+     * 例：protected $filterable = [
+     *     'name'   => 'lk',            // ?name=黄        → name like '%黄%'
+     *     'price'  => ['ge', 'le'],    // ?price=ge:10&&le:20 → 区间；?price=le:100 单边
+     *     'status' => 'in',            // ?status=1,2     → status in (1,2)
+     * ];
+     *
+     * 规则：
+     * - 值可带操作符前缀，前缀必须在白名单内，否则抛 InvalidParamException（防越权查询）；
+     * - 不带前缀时默认使用白名单第一个操作符；
+     * - 命中映射的参数按映射处理，不再调用同名过滤方法；其余参数行为不变。
+     *
+     * @var array
+     */
+    protected $filterable = [];
+
     public function __construct($input = null)
     {
         if ($input instanceof Request) {
@@ -76,6 +94,12 @@ abstract class QueryFilter
 
         foreach ($this->input as $name => $value) {
             if (is_null($value)) continue;
+
+            // 声明式过滤优先：命中 $filterable 映射的参数按映射构建条件
+            if ($this->applyFilterableParam($name, $value)) {
+                continue;
+            }
+
             if (!method_exists($this, $name)) continue;
             if ($this->isInternalMethod($name)) continue;
             call_user_func_array([$this, $name], [$value]);
@@ -84,6 +108,48 @@ abstract class QueryFilter
         $this->applyAfter();
 
         return $this->builder;
+    }
+
+    /**
+     * 按声明式映射构建过滤条件
+     *
+     * @param string $name 请求参数名
+     * @param mixed $value 参数值
+     * @return bool 是否命中映射（true 表示已按映射处理）
+     */
+    private function applyFilterableParam($name, $value)
+    {
+        if (empty($this->filterable) || !array_key_exists($name, $this->filterable)) {
+            return false;
+        }
+
+        $ops = $this->filterable[$name];
+        if (is_string($ops)) {
+            $ops = explode(',', $ops);
+        }
+        $ops = array_values(array_filter(array_map('trim', (array)$ops)));
+        if (empty($ops)) {
+            return false;
+        }
+
+        $explicitOp = null;
+        if (is_scalar($value) && Str::startsWith((string)$value, $this->ops())) {
+            $explicitOp = explode(':', (string)$value)[0];
+
+            // 显式操作符必须在白名单内，防止越权查询
+            if (!in_array($explicitOp, $ops, true)) {
+                $this->throwError($name);
+            }
+        }
+
+        // 不带前缀：默认取白名单第一个操作符
+        if ($explicitOp === null && is_scalar($value)) {
+            $value = $ops[0] . ':' . $value;
+        }
+
+        $this->analyzeParam($name, $value);
+
+        return true;
     }
 
     /**

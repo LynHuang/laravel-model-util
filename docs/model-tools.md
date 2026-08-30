@@ -17,6 +17,77 @@ $ids  = TreeHelper::ancestors($items, 4);                    // 节点 4 的所�
 
 字段名可通过参数自定义：`toTree($items, $idKey = 'id', $parentKey = 'parent_id', $childrenKey = 'children', $rootId = null)`。
 
+## 模型树 HasTree
+
+把树形能力接到 Eloquent 上（parent_id 邻接表模式），与 TreeHelper 配套：
+
+```php
+use LynHuang\LaravelModelUtil\Traits\HasTree;
+
+class Category extends Model
+{
+    use HasTree;
+    protected $treeParentColumn = 'parent_id';   // 父级字段，可覆盖
+}
+
+Category::query()->roots()->get();                  // 顶级节点
+Category::query()->childrenOf(1)->get();            // 节点 1 的直接子节点
+Category::query()->descendantsOf(1)->get();         // 节点 1 的所有后代（含各级）
+
+$category->getChildren();                           // 直接子节点集合
+$category->getDescendants();                        // 所有后代（深度优先顺序）
+$category->getDescendants(true);                    // 含自身
+$category->getAncestors();                          // 所有祖先（由近到远）
+$category->descendantIds();                         // 后代 id 数组
+```
+
+> 后代 / 祖先计算一次性取 `[主键, 父级字段]` 在内存组装，适合栏目、菜单、分类等中小规模树。
+
+## 乐观锁 OptimisticLocking
+
+基于版本号字段检测并发修改，防止互相覆盖：
+
+```php
+use LynHuang\LaravelModelUtil\Traits\OptimisticLocking;
+
+class Order extends Model
+{
+    use OptimisticLocking;
+    protected $optimisticLockColumn = 'version';   // 版本字段，默认 version（建议整型 NOT NULL DEFAULT 0）
+}
+
+try {
+    $order->fill(['status' => 'paid'])->save();    // 保存时自动 version + 1
+} catch (OptimisticLockException $e) {
+    // 数据已被其他请求修改，提示用户刷新，
+    // 或使用 saveWithRetry() 自动重试（以最新数据为基础重新应用本次修改，最后写入胜出）
+    $order->saveWithRetry(2);
+}
+```
+
+> 通过 Query Builder 的批量 update 与 BatchHelper 不经过模型保存流程，不校验、不递增版本号。
+
+## 计数缓存 CounterCache
+
+关联模型新增 / 删除 / 软删恢复时，自动维护父模型上的计数字段，省掉列表页的 `withCount`：
+
+```php
+use LynHuang\LaravelModelUtil\Traits\CounterCache;
+
+class User extends Model
+{
+    use CounterCache;
+
+    protected $countCaches = [
+        'comments_count' => Comment::class,                // 默认外键 user_id
+        'articles_count' => [Article::class, 'author_id'], // 自定义外键
+    ];
+}
+
+$user->comments_count;                 // 计数随关联增删自动增减
+$user->syncCountCache();               // 数据漂移时全量校准（按关联表重新统计）
+```
+
 ## 排序重排 Sortable
 
 基于 `weight` 字段（可覆盖）提供拖拽排序，支持按分组（如同分类内）排序：
