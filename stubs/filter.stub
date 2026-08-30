@@ -1,0 +1,36 @@
+<?php
+
+namespace {{ namespace }};
+
+use LynHuang\LaravelModelUtil\Filter\QueryFilter;
+
+class {{ class }} extends QueryFilter
+{
+    /**
+     * 允许排序的字段白名单，配合 ?sort=-created_at,name 使用（负号倒序）
+     *
+     * @var array
+     */
+    protected $sortable = ['id', 'created_at'];
+
+    /**
+     * 声明式过滤：键为数据库字段名（也是请求参数名），值为允许的操作符
+     * 可用操作符：gt / ge / eq / ne / lt / le / bt / nb / in / ni / lk / nl / nn
+     * 例：?status=1,2 → status in (1, 2)
+     *
+     * @var array
+     */
+    protected $filterable = [
+        'status' => 'in',
+    ];
+
+    /**
+     * 方法名即请求参数名：?cname=黄 时触发，映射到真实字段 name（可隐藏数据库字段名）
+     *
+     * @param mixed $value
+     */
+    public function cname($value)
+    {
+        $this->analyzeParam('name', 'lk:' . $value);
+    }
+}

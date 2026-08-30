@@ -30,6 +30,17 @@ class ModelUtilServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'model-util-migrations');
+
+            // 发布 stub 模板，供用户自定义 make:filter 生成的骨架
+            $this->publishes([
+                __DIR__ . '/../stubs/filter.stub' => base_path('stubs/model-util/filter.stub'),
+            ], 'model-util-stubs');
+
+            // 脚手架与辅助命令
+            $this->commands([
+                Console\MakeFilterCommand::class,
+                Console\RouteSearchCommand::class,
+            ]);
         }
 
         $this->registerSqlLog();

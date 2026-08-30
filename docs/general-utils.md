@@ -2,6 +2,27 @@
 
 > [返回首页](../README.md) · [安装与配置](installation.md)
 
+## 路由搜索 route:search
+
+按关键字模糊搜索路由（匹配 URI / 路由名称 / 控制器动作，大小写不敏感），表格输出请求方式、URI、路由名称与控制器方法：
+
+```bash
+php artisan route:search user            # 关键字模糊匹配
+php artisan route:search order --method=POST   # 按请求方式过滤
+php artisan route:search                 # 不带关键字列出全部路由
+```
+
+输出示例：
+
+```
++------------+-------------+--------------+-------------------------------+
+| 请求方式   | URI         | 路由名称     | 控制器@方法                    |
++------------+-------------+--------------+-------------------------------+
+| GET|HEAD   | api/users   | users.index  | App\Http\Controllers\...@index |
++------------+-------------+--------------+-------------------------------+
+共找到 1 条路由
+```
+
 ## 统一响应 ApiResponse
 
 统一返回 `['code' => 0, 'message' => 'ok', 'data' => ...]` 结构，控制器中直接 return 即可：

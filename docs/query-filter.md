@@ -6,6 +6,17 @@
 
 ## 快速开始
 
+用脚手架生成过滤器骨架（含可运行的示例方法）：
+
+```bash
+php artisan make:filter UserFilter       # 生成 app/Filters/UserFilter.php
+php artisan make:filter Admin/UserFilter # 支持子命名空间，已存在时加 --force 覆盖
+```
+
+生成目录可通过 `config('model_util.filters.directory')` 修改（相对 `app/` 路径，命名空间随目录同步）；骨架模板可用 `php artisan vendor:publish --tag=model-util-stubs` 发布后自定义。
+
+然后按需修改：
+
 ```php
 <?php
 // app/Filters/UserFilter.php

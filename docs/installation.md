@@ -34,6 +34,11 @@ return [
     // 操作审计 diff 排除的敏感字段（RecordsActivity 使用）
     'activity_excludes' => ['password', 'password_confirmation', 'remember_token', 'updated_at'],
 
+    // 过滤器脚手架（make:filter 使用）
+    'filters' => [
+        'directory' => 'Filters',   // 生成目录，相对 app/ 路径，支持子目录
+    ],
+
     // SQL 日志（生产环境强制关闭）
     'sql_log' => [
         'enabled' => false,   // 是否开启
@@ -91,6 +96,22 @@ class Member extends Model
 记录内容：SQL 语句、绑定参数、执行耗时（ms）、连接名。
 
 `slow_ms` 大于 0 时进入慢查询模式：只记录耗时超过阈值的语句，级别固定为 `warning`（适合常开不刷屏）；默认 `0` 记录全部 SQL，级别取 `level` 配置。
+
+### `filters`
+
+`make:filter` 脚手架的生成配置：
+
+- `directory`：过滤器类的生成目录，相对 `app/` 路径，默认 `Filters`；支持子目录（如 `Admin/Filters` → `app/Admin/Filters`），类的命名空间随目录同步变化。
+
+## 自定义 stub 模板（可选）
+
+`make:filter` 生成的骨架来自包内 `stubs/filter.stub`，可发布到项目中修改：
+
+```bash
+php artisan vendor:publish --tag=model-util-stubs
+```
+
+发布后生成 `stubs/model-util/filter.stub`，命令会优先使用该文件（不存在时回退到包内默认模板）。
 
 ## 发布迁移文件（可选）
 
