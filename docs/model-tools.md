@@ -19,7 +19,7 @@ $ids  = TreeHelper::ancestors($items, 4);                    // 节点 4 的所�
 
 ## 排序重排 Sortable
 
-基于 `weight` 字段（可覆盖）提供拖拽排序：
+基于 `weight` 字段（可覆盖）提供拖拽排序，支持按分组（如同分类内）排序：
 
 ```php
 use LynHuang\LaravelModelUtil\Traits\Sortable;
@@ -27,17 +27,20 @@ use LynHuang\LaravelModelUtil\Traits\Sortable;
 class Menu extends Model
 {
     use Sortable;
-    protected $sortColumn = 'weight';   // 排序字段，可覆盖
+    protected $sortColumn = 'weight';                  // 排序字段，可覆盖
+    protected $sortGroupColumns = ['parent_id'];       // 分组字段，声明后移动/置顶/置底限定同组内
 }
 
-$menu->moveUp();              // 上移
+$menu->moveUp();              // 上移（有分组时在同组内移动）
 $menu->moveDown();            // 下移
-$menu->moveToTop();           // 置顶
-$menu->moveToBottom();        // 置底
-Menu::query()->reorder([3, 1, 2]);  // 按主键顺序整体重排
+$menu->moveToTop();           // 置顶（组内）
+$menu->moveToBottom();        // 置底（组内）
+Menu::query()->reorder([3, 1, 2]);  // 按主键顺序整体重排（单条 CASE WHEN 批量更新）
 
 Menu::query()->ordered()->get();     // 按排序字段升序查询（scope）
 ```
+
+> 使用分组字段时，`reorder()` 传入的 id 应为同一分组内的排序结果。
 
 ## 多语言字段 Translatable
 
@@ -130,7 +133,7 @@ Order::logActivity('手动导入订单', $order);   // 手动记录
 
 ## 状态机 HasStates
 
-子类声明流转规则，校验非法流转：
+子类声明流转规则，校验非法流转；可为目标状态配置 before 守卫 / after 副作用钩子与展示名：
 
 ```php
 use LynHuang\LaravelModelUtil\Traits\HasStates;
@@ -143,17 +146,33 @@ class Order extends Model
     {
         return [
             'pending'   => ['to' => ['paid', 'canceled']],
-            'paid'      => ['to' => ['shipped']],
+            'paid'      => [
+                'to'     => ['shipped'],
+                'before' => function ($model, $from) {   // 进入 paid 前的守卫
+                    return $model->amount > 0;           // 返回 false 时阻止流转并抛异常
+                },
+                'after'  => function ($model, $from) {   // 进入 paid 后的副作用
+                    // 如：Notify::paid($model);
+                },
+            ],
             'shipped'   => ['to' => ['completed']],
             'canceled'  => ['to' => []],
             'completed' => ['to' => []],
         ];
     }
+
+    protected function stateLabels()   // 可选：状态展示名
+    {
+        return ['pending' => '待支付', 'paid' => '已支付', 'shipped' => '已发货'];
+    }
 }
 
-$order->canTransitionTo('status', 'paid');   // 是否允许流转（不修改数据）
-$order->transitionTo('status', 'paid');      // 校验并切换，非法流转抛 InvalidArgumentException
+$order->canTransitionTo('status', 'paid');   // 是否允许流转（不修改数据、不触发钩子）
+$order->transitionTo('status', 'paid');      // 校验并切换（含钩子），非法流转抛 InvalidArgumentException
+$order->stateLabel('status');                // 状态展示名，未配置时原样返回状态值
 ```
+
+> 钩子在流转时（内存中）触发，与保存时机无关；回调签名统一为 `function ($model, $fromState)`。
 
 ## 唯一编号 OrderNoGenerator
 
@@ -163,4 +182,8 @@ use LynHuang\LaravelModelUtil\Helper\OrderNoGenerator;
 OrderNoGenerator::generate('SO');              // SO20260822153045A1B2C33456（前缀+日期+随机+微秒）
 OrderNoGenerator::short('U');                  // 不含日期
 OrderNoGenerator::generateWithChecksum('NO');  // 末尾追加 Luhn 校验位，防手输错误
+OrderNoGenerator::validateChecksum($no);       // 校验带校验位的编号是否有效
+OrderNoGenerator::generateWithSequence('SO');  // 按天序列发号：SO20260830-000123（防并发，缓存原子自增）
 ```
+
+> `generateWithSequence` 多进程 / 多机部署需使用共享缓存驱动（redis / memcached 等），序列按天重置、可读可排序。

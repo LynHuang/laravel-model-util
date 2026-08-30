@@ -72,6 +72,8 @@ class TreeHelper
     /**
      * 获取指定节点的所有后代 id（含直接与间接子级）
      *
+     * 先按父级建立索引再深度优先遍历，整体 O(n)（避免每个节点都重新全量扫描）。
+     *
      * @param array $items 扁平数组
      * @param mixed $id 节点 id
      * @param bool $includeSelf 是否包含自身
@@ -81,12 +83,33 @@ class TreeHelper
      */
     public static function descendants(array $items, $id, bool $includeSelf = false, string $idKey = 'id', string $parentKey = 'parent_id')
     {
-        $result = [];
-
+        // 按 父级 => [子级id] 建索引
+        $childrenOf = [];
         foreach ($items as $item) {
-            if (($item[$parentKey] ?? null) == $id) {
-                $result[] = $item[$idKey];
-                $result = array_merge($result, self::descendants($items, $item[$idKey], false, $idKey, $parentKey));
+            $parent = $item[$parentKey] ?? null;
+            $childrenOf[$parent === null ? '' : $parent][] = $item[$idKey];
+        }
+
+        $result  = [];
+        $visited = [];
+        // 用栈做深度优先遍历；子级倒序入栈，保证出栈顺序与 items 中的出现顺序一致
+        $start = $id === null ? '' : $id;
+        $stack = [$start];
+
+        while ($stack !== []) {
+            $current = array_pop($stack);
+            if (isset($visited[$current])) {
+                continue; // 防御脏数据里的循环引用，正常树形结构不会命中
+            }
+            $visited[$current] = true;
+
+            if ($current != $start) {
+                $result[] = $current;
+            }
+
+            $children = $childrenOf[$current] ?? [];
+            for ($i = count($children) - 1; $i >= 0; $i--) {
+                $stack[] = $children[$i];
             }
         }
 

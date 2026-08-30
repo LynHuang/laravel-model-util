@@ -2,6 +2,8 @@
 
 namespace LynHuang\LaravelModelUtil\Helper;
 
+use Illuminate\Support\Facades\Cache;
+
 /**
  * 唯一编号生成辅助
  *
@@ -52,6 +54,54 @@ class OrderNoGenerator
         $body = self::generate($prefix, $suffix);
 
         return $body . self::luhnCheckDigit($body);
+    }
+
+    /**
+     * 校验带校验位编号的正确性（与 generateWithChecksum 配套）
+     *
+     * @param string $no 编号（末位为校验位）
+     * @return bool
+     */
+    public static function validateChecksum(string $no): bool
+    {
+        if ($no === '') {
+            return false;
+        }
+
+        $body   = substr($no, 0, -1);
+        $digit  = substr($no, -1);
+        $digits = preg_replace('/\D/', '', $body);
+
+        // 主体至少要有一个数字才能参与校验
+        if (!ctype_digit($digit) || $digits === '') {
+            return false;
+        }
+
+        return self::luhnCheckDigit($body) === (int)$digit;
+    }
+
+    /**
+     * 生成按天递增的序列编号（防并发，格式：前缀 + Ymd + '-' + 补零序列）
+     *
+     * 例：generateWithSequence('SO') → SO20260830-000123
+     * 序列基于缓存原子自增，同一天内保证不重复、可读且可排序。
+     * 多进程 / 多机部署需使用共享缓存驱动（redis / memcached 等），
+     * 单机 file / array 驱动仅保证单进程内不重复。
+     *
+     * @param string $prefix 前缀
+     * @param int $padLength 序列号补零位数
+     * @param int $ttl 序列缓存键的有效时长（秒），需覆盖跨天边界，默认 2 天
+     * @return string
+     */
+    public static function generateWithSequence(string $prefix = '', int $padLength = 6, int $ttl = 172800)
+    {
+        $date = date('Ymd');
+        $key  = 'model_util:order_no_sequence:' . $prefix . ':' . $date;
+
+        Cache::add($key, 0, $ttl);
+        $seq = Cache::increment($key);
+
+        return $prefix . $date . '-' . str_pad((string)$seq, $padLength, '0', STR_PAD_LEFT);
     }
 
     /**

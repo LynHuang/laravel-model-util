@@ -40,6 +40,9 @@ class ModelUtilServiceProvider extends ServiceProvider
      *
      * 开启条件：config('model_util.sql_log.enabled') 为 true 且非生产环境。
      * 运行时动态判断，方便开发环境随时开关。
+     *
+     * 配置 sql_log.slow_ms 大于 0 时进入慢查询模式：只记录耗时超过阈值的语句，
+     * 且级别固定为 warning；未配置（默认 0）时记录全部 SQL，级别取 sql_log.level。
      */
     protected function registerSqlLog()
     {
@@ -56,16 +59,31 @@ class ModelUtilServiceProvider extends ServiceProvider
                 return;
             }
 
+            $slowMs = (int)($options['slow_ms'] ?? 0);
+            if ($slowMs > 0) {
+                // 慢查询模式：低于阈值的语句直接跳过
+                if ($query->time < $slowMs) {
+                    return;
+                }
+                $level = 'warning';
+            } else {
+                $level = $options['level'] ?? 'debug';
+            }
+
             $channel = $options['channel'] ?? null;
-            $level   = $options['level'] ?? 'debug';
             $logger  = $channel ? Log::channel($channel) : Log::stack([Log::getDefaultDriver()]);
 
-            $logger->{$level}('SQL executed', [
+            $context = [
                 'sql'        => $query->sql,
                 'bindings'   => $query->bindings,
                 'time_ms'    => round($query->time, 2),
                 'connection' => $query->connectionName,
-            ]);
+            ];
+            if ($slowMs > 0) {
+                $context['slow_ms'] = $slowMs;
+            }
+
+            $logger->{$level}('SQL executed', $context);
         });
     }
 }

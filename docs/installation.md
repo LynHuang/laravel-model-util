@@ -39,6 +39,7 @@ return [
         'enabled' => false,   // 是否开启
         'channel' => null,    // 日志通道，null 使用默认
         'level'   => 'debug', // 日志级别：debug / info / warning / error
+        'slow_ms' => 0,       // 慢查询阈值（毫秒），>0 时只记录超阈值语句（warning 级别）
     ],
 ];
 ```
@@ -88,6 +89,8 @@ class Member extends Model
 通过 Laravel 日志系统记录每次执行的 SQL（不落数据库）。`enabled` 为 `true` 时开启；**生产环境（`app.env = production`）强制关闭**，即使 `enabled` 为 `true` 也不记录，防止敏感 SQL 泄露到日志。
 
 记录内容：SQL 语句、绑定参数、执行耗时（ms）、连接名。
+
+`slow_ms` 大于 0 时进入慢查询模式：只记录耗时超过阈值的语句，级别固定为 `warning`（适合常开不刷屏）；默认 `0` 记录全部 SQL，级别取 `level` 配置。
 
 ## 发布迁移文件（可选）
 

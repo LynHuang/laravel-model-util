@@ -59,6 +59,10 @@ return [
         'channel' => null,
 
         // 日志级别：debug / info / warning / error
+        // 配置 slow_ms 后自动升级为 warning（慢查询模式）
         'level' => 'debug',
+
+        // 慢查询阈值（毫秒），大于 0 时只记录耗时超过该值的语句（级别固定 warning）
+        'slow_ms' => 0,
     ],
 ];
