@@ -59,7 +59,7 @@ $article->hasTranslation('title', 'en');          // 是否已有英文翻译
 
 ## 字段加解密 EncryptsAttributes
 
-模型事件自动加密存储、解密读取，支持精确/模糊查询：
+模型事件自动加密存储、解密读取，并通过**盲索引列**支持精确查询：
 
 ```php
 use LynHuang\LaravelModelUtil\Traits\EncryptsAttributes;
@@ -70,11 +70,26 @@ class Member extends Model
     protected $encryptable = ['mobile', 'id_card'];   // 需要加解密的字段列表
 }
 
-$member = Member::whereEncrypted('mobile', '13812348888')->first();  // 精确查询
-$members = Member::whereEncryptedLike('mobile', '138')->get();       // 模糊查询
+$member = Member::whereEncrypted('mobile', '13812348888')->first();  // 精确查询（走盲索引列）
 ```
 
-> 加密基于 Laravel 的 `encrypt()` / `decrypt()`，密钥使用应用的 `APP_KEY`。无法解密的旧数据会保留原值。
+**迁移**：精确查询基于盲索引列（HMAC-SHA256，密钥由 `APP_KEY` 派生），需为每个加密字段增加对应的 `<字段>_hash` 列并建议加索引：
+
+```php
+$table->string('mobile_hash', 64)->nullable()->index();
+$table->string('id_card_hash', 64)->nullable()->index();
+```
+
+已有数据回填：
+
+```php
+Member::backfillEncryptHashes();   // 解密存量密文，补写盲索引列
+```
+
+> - 加密基于 Laravel 的 `encrypt()` / `decrypt()`，密钥使用应用的 `APP_KEY`。无法解密的旧数据会保留原值。
+> - **加密字段无法做模糊查询**：每次加密产生的密文都不同（随机 IV），`whereEncryptedLike` 已废弃，调用会抛出异常。如需模糊检索，请额外维护一个明文或脱敏（`MaskHelper`）的可搜索字段。
+> - 未创建盲索引列时不影响加解密存取，只是 `whereEncrypted` 不可用；盲索引列名后缀可通过模型的 `$encryptHashSuffix` 属性覆盖。
+> - 通过 Query Builder 的批量 update（`Model::query()->update()` 等）不触发模型事件，不会自动加解密，请走 Eloquent 的 save / update 路径。
 
 ## 字段脱敏 MaskHelper
 
@@ -102,13 +117,14 @@ use LynHuang\LaravelModelUtil\Traits\RecordsActivity;
 
 class Order extends Model
 {
-    use RecordsActivity;   // 创建/更新/删除自动写 activity_logs
+    use RecordsActivity;   // 创建/更新/删除/软删恢复自动写 activity_logs
 }
 
 Order::logActivity('手动导入订单', $order);   // 手动记录
 ```
 
-- 更新时自动记录变更 diff（before / after）到 `properties` 字段。
+- 支持 created / updated / deleted / restored（软删恢复，需模型使用 SoftDeletes）四类事件。
+- 更新时自动记录变更 diff（before / after）到 `properties` 字段；`password` 等敏感字段默认排除（见 `config('model_util.activity_excludes')`），模型可通过 `$activityExcludes` 属性追加自己的排除项。
 - 操作人默认取当前登录用户（`auth()->user()`），可通过复写 `activityCauser()` 调整。
 - 日志表名通过 `config('model_util.activity_logs_table')` 配置，默认 `activity_logs`。
 

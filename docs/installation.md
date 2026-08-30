@@ -31,6 +31,9 @@ return [
     // 操作审计日志表名（RecordsActivity 使用）
     'activity_logs_table' => 'activity_logs',
 
+    // 操作审计 diff 排除的敏感字段（RecordsActivity 使用）
+    'activity_excludes' => ['password', 'password_confirmation', 'remember_token', 'updated_at'],
+
     // SQL 日志（生产环境强制关闭）
     'sql_log' => [
         'enabled' => false,   // 是否开启
@@ -67,6 +70,18 @@ class CommentFilter extends QueryFilter
 ### `activity_logs_table`
 
 `RecordsActivity` Trait 写入操作日志的表名，默认 `activity_logs`。
+
+### `activity_excludes`
+
+`RecordsActivity` 记录更新前后 diff（`properties`）时排除的字段，避免密码等敏感信息明文写入审计日志。模型可通过 `$activityExcludes` 属性追加自己的排除项（与该配置合并生效）：
+
+```php
+class Member extends Model
+{
+    use RecordsActivity;
+    protected $activityExcludes = ['id_card'];
+}
+```
 
 ### `sql_log`
 
